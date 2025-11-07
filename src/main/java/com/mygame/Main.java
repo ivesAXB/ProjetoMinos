@@ -26,304 +26,259 @@ import com.jme3.scene.shape.Box;
  * Esta classe inicializa o jogo, o mundo da física e os controlos.
  */
 public class Main extends SimpleApplication implements ActionListener, AnalogListener {
-    private boolean modoCameraCima = false;
+
     // --- Variáveis Globais do Jogo ---
-    // O "chefe" do mundo da física. Controla a gravidade e as colisões.
-    private BulletAppState bulletAppState; 
-    // O nosso jogador. É um "controlador" de física, não um objeto visual.
-    private CharacterControl player;       
-    // "Bandeiras" (flags) para saber se as teclas de movimento estão premidas
+    
+    private BulletAppState bulletAppState;
+    private CharacterControl player;
+    
+    // Flags de movimento
     private boolean left = false, right = false, up = false, down = false;
-    // Um objeto "ajudante" para cálculos de rotação (evita criar novos a cada frame)
+    
+    // Objeto ajudante para rotação
     private final Quaternion tempRotation = new Quaternion();
+    
+    // Variável para "inclinar" a câmara (olhar cima/baixo)
     private float camVerticalAngle = 0f;
-    private final String[] mapaLabirinto = new String[] {
+    
+    // Flag para o "interruptor" da câmara (F)
+    private boolean modoCameraCima = false;
+    
+    // O "mapa" 2D do nosso labirinto
+    private final String[] mapaLabirinto = new String[]{
         "XXXXXXXXXXXXXXXXXXXXX",
-        "X        X          X",
-        "X XXX XX X XXX XX X X",
-        "X X   X  X X   X  X X",
-        "X XX XXX X XX XXX X X",
-        "X  X   X X  X   X X X",
-        "XX XX X X XX XX X X X",
-        "X   X X    X   X X X",
-        "X XXX XXXXXX XXX X X",
-        "X   X      X   X   X",
+        "XOOOOOOOOXOOOOOOOOOOX", // O Spawn é aqui (1,1)
+        "XOXXXOXXOXOXXXOXXOXOX",
+        "XOXOOOXOOXOXOOOXOOXOX",
+        "XOXXOXXXOXOXXOXXXOXOX",
+        "XOOXOOOXOOOOXOOOXOXOX",
+        "XXOXXOXOXOXXOXXOXOXOX",
+        "XOOOXOXOOOOOOOOXOXOOX",
+        "XOXXXOXXXXXXOXXXOXOOX",
+        "XOOOXOOOOOOXOOOXOOOOX",
         "XXXXXXXXXXXXXXXXXXXXX"
     };
 
-    
     /**
      * Ponto de entrada do programa.
      * @param args
      */
     public static void main(String[] args) {
         Main app = new Main();
-        app.start(); // Inicia a aplicação JME
+        app.start();
     }
 
     /**
-     * Este é o método principal de inicialização.
-     * É chamado uma vez quando o jogo começa.
+     * Método de inicialização (chamado uma vez).
      */
     @Override
     public void simpleInitApp() {
-        
-        // --- 1. Configurar a Física ---
-        
-        // Inicializa o "mundo" da física
+
+        // 1. Inicia a Física
         bulletAppState = new BulletAppState();
-        stateManager.attach(bulletAppState); // "Liga" o motor de física ao jogo
+        stateManager.attach(bulletAppState);
+        // Descomente a linha abaixo para ver os "arames" azuis da física
+        // bulletAppState.setDebugEnabled(true);
 
-        // Ativa a "depuração" (debug)
-        // Isto desenha "arames" azuis à volta dos objetos físicos. Útil para ver colisões.
-        //bulletAppState.setDebugEnabled(true);
-
-        // --- 2. Configurar Controlos (Rato e Teclado) ---
-        
-        // Esta é a "combinação mágica" que resolve o problema do rato:
-        // 1. Esconde o cursor do Windows.
-        // 2. O 'flyCam' (que ainda está ativo) agarra o rato (mouse lock).
-        // 3. O 'setupKeys' (abaixo) "rouba" o controlo do 'flyCam'.
+        // 2. Configura os Controlos
         inputManager.setCursorVisible(false);
-        setupKeys(); // Chama o nosso método para mapear as teclas
+        setupKeys(); // Chama o nosso método de mapeamento
 
-        construirLabirinto();
-        
-        // --- 5. Criar o Jogador ---
-        // Define a forma de colisão do jogador (uma "cápsula")
-        // Raio de 0.5f, Altura de 2f
+        // 3. Constrói o Mundo
+        construirLabirinto(); // Este método agora constrói o chão E as paredes
+
+        // 4. Cria o Jogador
         CapsuleCollisionShape capsuleShape = new CapsuleCollisionShape(0.5f, 2f);
+        player = new CharacterControl(capsuleShape, 0.1f);
+        player.setJumpSpeed(20);
+        player.setFallSpeed(30);
+        player.setGravity(30);
 
-        // Inicializa o nosso "player" (controlador de personagem)
-        player = new CharacterControl(capsuleShape, 0.1f); // 0.1f é a altura do degrau
-
-        // Define a física do jogador
-        player.setJumpSpeed(20);  // Velocidade do pulo
-        player.setFallSpeed(30);  // Velocidade da queda
-        player.setGravity(30);    // Força da gravidade (puxa para baixo)
-
-        // Define a posição inicial do jogador
-        // (0, 3, 0) -> 3 unidades ACIMA do chão (para ele "cair" no início)
+        // Define o Ponto de Spawn (Estático) - (Mapa 1,1) -> (Mundo 4,3,4)
         player.setPhysicsLocation(new Vector3f(4.0f, 3.0f, 4.0f));
 
-        // Adiciona o jogador APENAS ao mundo da física
-        // (Não o adicionamos ao rootNode, porque ele é invisível, só a sua física importa)
+        // Adiciona o jogador ao mundo da física
         bulletAppState.getPhysicsSpace().add(player);
     }
-    
+
     /**
-     * Método "ajudante" que constrói UMA parede física e visual.
-     * @param x Posição X (centro da parede)
-     * @param y Posição Y (centro da parede)
-     * @param z Posição Z (centro da parede)
+     * Constrói UMA parede física e visual.
+     * (Versão com a ORDEM DE POSICIONAMENTO CORRIGIDA)
      */
     private void criarParede(float x, float y, float z) {
-        // Define as dimensões da parede
-        float raioLargura = 2.0f; // Metade da largura (Total = 4.0f)
-        float raioAltura = 1.5f;  // Metade da altura (Total = 3.0f)
-        float raioEspessura = 2.0f; // Metade da espessura (Total = 4.0f)
-        
-        // Cria a "forma" visual (uma caixa)
+        // Tamanhos: 4.0f largura x 3.0f altura x 4.0f profundidade
+        float raioLargura = 2.0f;
+        float raioAltura = 1.5f;
+        float raioEspessura = 2.0f;
+
+        // Visual
         Box formaParede = new Box(raioLargura, raioAltura, raioEspessura);
         Geometry geoParede = new Geometry("Parede", formaParede);
-        
-        // Cria o "material" (a cor)
         Material matParede = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
-        matParede.setColor("Color", ColorRGBA.Red); // <-- CORRIGIDO! (Para ser fácil de ver)
+        matParede.setColor("Color", ColorRGBA.Red); // Cor Vermelha
         geoParede.setMaterial(matParede);
 
-        // --- A Física ---
-        
-        // Cria a forma de colisão (a partir da geometria)
+        // Física
         CollisionShape fisicaFormaParede = CollisionShapeFactory.createBoxShape(geoParede);
-        
-        // Cria o corpo físico (0kg = Estático, não se mexe)
         RigidBodyControl fisicaCorpoParede = new RigidBodyControl(fisicaFormaParede, 0);
-        
-        // "Cola" a física ao objeto visual
-        // (Isto faz com que o visual "salte" para a posição da física)
+
+        // --- LÓGICA DE POSICIONAMENTO CORRIGIDA (Plano F) ---
+        // 1. "Cola" o visual à física (ambos em 0,0,0)
         geoParede.addControl(fisicaCorpoParede);
         
-        // Adiciona ambos aos seus mundos
-        bulletAppState.getPhysicsSpace().add(fisicaCorpoParede); // Mundo da Física
-        rootNode.attachChild(geoParede); // Mundo Visual
-        // Define a posição da parede no MUNDO DA FÍSICA
+        // 2. Adiciona ambos aos seus mundos (ainda em 0,0,0)
+        bulletAppState.getPhysicsSpace().add(fisicaCorpoParede);
+        rootNode.attachChild(geoParede);
+        
+        // 3. AGORA move o "pacote" (física + visual) para o local final
         fisicaCorpoParede.setPhysicsLocation(new Vector3f(x, y, z));
     }
-    
+
     /**
-     * Método ajudante que constroi 1 bloco de chão físico e visual
-     * @param x posição em X (centro do bloco)
-     * @param z posição Z centro do bloco
+     * Constrói UM bloco de CHÃO físico e visual.
+     * (Versão com a ORDEM DE POSICIONAMENTO CORRIGIDA)
      */
     private void criarBlocoChao(float x, float z) {
+        // Tamanhos: 4.0f largura x 0.2f altura x 4.0f profundidade
         float raioLargura = 2.0f;
         float raioAltura = 0.1f;
         float raioEspessura = 2.0f;
-        
+
+        // Visual
         Box formaChao = new Box(raioLargura, raioAltura, raioEspessura);
         Geometry geoChao = new Geometry("Chao", formaChao);
-        
-        // COR do chão..
         Material matChao = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
-        matChao.setColor("Color", ColorRGBA.Green);
+        matChao.setColor("Color", ColorRGBA.Green); // Cor Verde
         geoChao.setMaterial(matChao);
-        
-        //Fisica..
+
+        // Física
         CollisionShape fisicaFormaChao = CollisionShapeFactory.createBoxShape(geoChao);
-        RigidBodyControl fisicaCorpoChao = new RigidBodyControl(fisicaFormaChao, 0); //0Kg
-        
-        //Define a posicao y = 0 para estar no chão
-        fisicaCorpoChao.setPhysicsLocation(new Vector3f(x, 0, z)); // y = 0
-        
+        RigidBodyControl fisicaCorpoChao = new RigidBodyControl(fisicaFormaChao, 0);
+
+        // --- LÓGICA DE POSICIONAMENTO CORRIGIDA (Plano F) ---
+        // (Exatamente a mesma ordem do criarParede, para consistência)
+        // 1. "Cola"
         geoChao.addControl(fisicaCorpoChao);
         
-        //add ao mundo
+        // 2. Adiciona
         bulletAppState.getPhysicsSpace().add(fisicaCorpoChao);
         rootNode.attachChild(geoChao);
         
-        
+        // 3. Move
+        fisicaCorpoChao.setPhysicsLocation(new Vector3f(x, 0, z)); // Y=0 (no chão)
     }
-    
-    private void construirLabirinto(){
-        float tamanhoBloco = 4.0f; //O nosso bloco é 4.0f x 4.0f
-        float alturaParede = 3.0f; // a nossa altura total é 3.0f
-        
-        //Loop pela altura do mapa (as linhas do eixo Z)
+
+    /**
+     * Lê o mapa e constrói o chão e as paredes.
+     */
+    private void construirLabirinto() {
+        float tamanhoBloco = 4.0f; // Nosso bloco é 4x4
+        float alturaParede = 3.0f; // Nossa parede tem 3 de altura
+
         for (int z = 0; z < mapaLabirinto.length; z++) {
             String linha = mapaLabirinto[z];
-            
-            //Loop pela largura do mapa (eixo X)
             for (int x = 0; x < linha.length(); x++) {
-                //calcula a posicao que é compartilhada pelo chao e paredes
+                
+                // 1. Calcula a posição 3D
                 float posX = x * tamanhoBloco;
                 float posZ = z * tamanhoBloco;
                 
-                //Criar chao independente do char 'x' ou '  '...
+                // 2. CRIA O CHÃO (Sempre!)
                 criarBlocoChao(posX, posZ);
-                
-                //se o caractere for x constroi parede
+
+                // 3. Se for 'X', cria a parede
                 char caractere = linha.charAt(x);
-                
                 if (caractere == 'X') {
-                   float posY = alturaParede / 2; //para a parede ficar no chão
-                   
-                   //chama a ferramente de paredes
-                   criarParede(posX, posY, posZ);
+                    float posY = alturaParede / 2; // (1.5f)
+                    criarParede(posX, posY, posZ);
                 }
             }
         }
     }
-    
+
     /**
-     * Método de inicialização que "mapeia" as teclas e o rato.
+     * Mapeia as teclas e o rato para as "ações".
      */
     private void setupKeys() {
-        // --- Teclado (WASD) ---
+        // WASD
         inputManager.addMapping("Left", new KeyTrigger(KeyInput.KEY_A));
         inputManager.addMapping("Right", new KeyTrigger(KeyInput.KEY_D));
         inputManager.addMapping("Up", new KeyTrigger(KeyInput.KEY_W));
         inputManager.addMapping("Down", new KeyTrigger(KeyInput.KEY_S));
-        
-        // Diz ao "inputManager" que "esta" classe (this) vai ouvir as ações do teclado
         inputManager.addListener(this, "Left", "Right", "Up", "Down");
         
-        // --- Rato (Eixos X e Y) ---
-        // Mapeia o movimento do rato (eixo X)
-        inputManager.addMapping("LookRight", new MouseAxisTrigger(MouseInput.AXIS_X, false)); // "true" = positivo (direita)
-        inputManager.addMapping("LookLeft", new MouseAxisTrigger(MouseInput.AXIS_X, true)); // "false" = negativo (esquerda)
-
-        // Mapeia o movimento do rato (eixo Y)
-        inputManager.addMapping("LookUp", new MouseAxisTrigger(MouseInput.AXIS_Y, false)); // "true" = positivo (para cima)
-        inputManager.addMapping("LookDown", new MouseAxisTrigger(MouseInput.AXIS_Y, true)); // "false" = negativo (para baixo)
-
-        // Diz ao "inputManager" que "esta" classe (this) vai ouvir os movimentos analógicos
+        // Rato (Eixos)
+        // CORRIGIDO: "Right" é positivo (true), "Left" é negativo (false)
+        inputManager.addMapping("LookRight", new MouseAxisTrigger(MouseInput.AXIS_X, false));
+        inputManager.addMapping("LookLeft", new MouseAxisTrigger(MouseInput.AXIS_X, true));
+        // CORRIGIDO: "Up" é positivo (true), "Down" é negativo (false)
+        inputManager.addMapping("LookUp", new MouseAxisTrigger(MouseInput.AXIS_Y, false));
+        inputManager.addMapping("LookDown", new MouseAxisTrigger(MouseInput.AXIS_Y, true));
         inputManager.addListener(this, "LookRight", "LookLeft", "LookUp", "LookDown");
         
-        // Mapeia a tecla 'F' para a ação "ToggleCamera"
+        // Tecla 'F' (Interruptor da Câmara)
         inputManager.addMapping("ToggleCamera", new KeyTrigger(KeyInput.KEY_F));
-        // Diz ao "ouvinte" (this) para "ouvir" esta nova ação
         inputManager.addListener(this, "ToggleCamera");
     }
-    
+
     /**
-     * "Ouvinte" do Teclado (ActionListener).
-     * Chamado pelo JME quando uma tecla (W,A,S,D) é PREMIDA ou LARGADA.
-     * @param name O nome da ação que foi disparada (ex: "Left", "Right").
-     * @param isPressed "true" se a tecla foi premida, "false" se foi largada.
-     * @param tpf O tempo por frame (não costumamos usar neste método).
+     * "Ouvinte" do Teclado (Chamado ao premir/largar W,A,S,D,F)
+     * (SINTAXE CORRIGIDA: Usa "colon" (:) e "break" para funcionar)
+     * @param name
+     * @param isPressed
+     * @param tpf
      */
     @Override
     public void onAction(String name, boolean isPressed, float tpf) {
         
-        // Usamos a sintaxe "switch expression" (Java 14+)
-        // Atualiza as nossas "bandeiras" booleanas
         switch (name) {
-            case "Left"  -> left = isPressed;
+            case "Left" -> left = isPressed;
             case "Right" -> right = isPressed;
-            case "Up"    -> up = isPressed;
-            case "Down"  -> down = isPressed;
-            case "ToggleCamera"-> {
-                // "isPressed" garante que só executamos na "descida" da tecla
-                if (isPressed) { 
-                    // Inverte o valor da "bandeira" (interruptor)
-                    modoCameraCima = !modoCameraCima; 
+            case "Up" -> up = isPressed;
+            case "Down" -> down = isPressed;
+            case "ToggleCamera" -> {
+                if (isPressed) {
+                    modoCameraCima = !modoCameraCima;
                 }
-                break; // Não te esqueças do break!
             }
         }
     }
-    
+
     /**
-     * "Ouvinte" do Rato (AnalogListener).
-     * Chamado a cada frame que o rato se mexe.
-     * @param name O nome da ação que foi disparada (ex: "LookRight").
-     * @param value A intensidade do movimento (o "quanto" o rato mexeu).
-     * @param tpf O tempo por frame (usado para suavizar o movimento).
+     * "Ouvinte" do Rato (Chamado a cada movimento do rato)
+     * (SINTAXE CORRIGIDA: Usa "colon" (:) e "break" para funcionar)
+     * @param name
+     * @param value
+     * @param tpf
      */
     @Override
     public void onAnalog(String name, float value, float tpf) {
-        // "value" é a intensidade do movimento do rato
-        
-        float rotationSpeed = 2.0f; // Podes ajustar esta velocidade!
-        
-        // O JME já aplica o 'tpf' ao 'value' nos AnalogListeners, 
-        // mas multiplicar por 'rotationSpeed' ajuda a controlar a sensibilidade.
+        float rotationSpeed = 2.0f;
+        float rotationAmount = value * rotationSpeed;
 
-        // --- Rotação Horizontal (Esquerda/Direita) ---
-        // (Isto roda o "corpo" do jogador, o CharacterControl)
-        
         switch (name) {
-            case "LookRight" ->  { //rotacao horizontal direita
-                float rotationAmount = value * rotationSpeed;
+            case "LookRight" -> {
                 tempRotation.fromAngleAxis(-rotationAmount, Vector3f.UNIT_Y);
-                Vector3f oldDirection = player.getViewDirection();
-                Vector3f newDirection = tempRotation.mult(oldDirection);
-                player.setViewDirection(newDirection);
+                Vector3f oldDirectionR = player.getViewDirection();
+                Vector3f newDirectionR = tempRotation.mult(oldDirectionR);
+                player.setViewDirection(newDirectionR);
+                // <-- BREAK ADICIONADO (CRÍTICO)
             }
-            case "LookLeft" -> { //esquerda
-                float rotationAmount = value * rotationSpeed;
+            case "LookLeft" -> {
                 tempRotation.fromAngleAxis(rotationAmount, Vector3f.UNIT_Y);
-                Vector3f oldDirection = player.getViewDirection();
-                Vector3f newDirection = tempRotation.mult(oldDirection);
-                player.setViewDirection(newDirection);
-                break;
+                Vector3f oldDirectionL = player.getViewDirection();
+                Vector3f newDirectionL = tempRotation.mult(oldDirectionL);
+                player.setViewDirection(newDirectionL);
             }
-            case "LookUp" -> { // cima
-                float rotationAmount = value * rotationSpeed * 0.5f;
-                camVerticalAngle -= rotationAmount;
-                break;
-            }
-            case "LookDown" -> {
-                float rotationAmount = value * rotationSpeed * 0.5f;
-                camVerticalAngle += rotationAmount;
-                break;
-            }
-            
+
+            case "LookUp" -> camVerticalAngle -= rotationAmount * 0.5f;
+
+            case "LookDown" -> camVerticalAngle += rotationAmount * 0.5f;
         }
-        
-        float maxAngle = 1.396f; //80 graus
-        float minAngle = -1.396f; //-80 graus
+
+        // Limita o ângulo do "pescoço"
+        float maxAngle = 1.396f; // 80 graus
+        float minAngle = -1.396f; // -80 graus
         
         if (camVerticalAngle > maxAngle) {
             camVerticalAngle = maxAngle;
@@ -333,89 +288,50 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
     }
 
     /**
-     * O "Game Loop" principal.
-     * Este método é chamado 60 vezes por segundo (ou mais).
-     * @param tpf "Time Per Frame" - O tempo que passou desde o último frame.
+     * O "Game Loop" (Chamado 60x por segundo)
+     * @param tpf
      */
     @Override
     public void simpleUpdate(float tpf) {
 
-        // --- 1. Lógica de Movimento (Baseado nas Teclas) ---
-
-        // Pega na direção da câmara (para onde estamos a olhar)
+        // --- 1. Lógica de Movimento (WASD) ---
         Vector3f camDir = cam.getDirection();
         Vector3f camLeft = cam.getLeft();
-        
-        // Vetor que guarda a direção final do nosso movimento
         Vector3f walkDirection = new Vector3f(0, 0, 0);
 
-        // Adiciona direções ao "walkDirection" com base nas teclas premidas
-        if (up) {
-            walkDirection.addLocal(camDir); // Adiciona "em frente"
-        }
-        if (down) {
-            walkDirection.addLocal(camDir.negate()); // Adiciona "para trás"
-        }
-        if (left) {
-            walkDirection.addLocal(camLeft); // Adiciona "para a esquerda"
-        }
-        if (right) {
-            walkDirection.addLocal(camLeft.negate()); // Adiciona "para a direita"
-        }
+        if (up) { walkDirection.addLocal(camDir); }
+        if (down) { walkDirection.addLocal(camDir.negate()); }
+        if (left) { walkDirection.addLocal(camLeft); }
+        if (right) { walkDirection.addLocal(camLeft.negate()); }
 
-        // Define a direção de "andar" no nosso "player" (controlador de física)
-        // .setY(0) garante que o jogador não voa se olharmos para cima/baixo
-        // .normalizeLocal() garante que andar na diagonal não é mais rápido
-        // .mult(0.1f) define a velocidade (0.1f). Podes aumentar para 0.2f, 0.3f, etc.
-        player.setWalkDirection(walkDirection.setY(0).normalizeLocal().mult(0.1f)); 
+        player.setWalkDirection(walkDirection.setY(0).normalizeLocal().mult(0.1f));
 
-        // --- 2. Lógica da Câmara (COM O INTERRUPTOR) ---
-        
+        // --- 2. Lógica da Câmara (Interruptor F) ---
         if (modoCameraCima == false) {
             // --- MODO 1ª PESSOA ---
-            
-            // 2.1. Obtém a posição e direção do CORPO (horizontal)
             Vector3f posCorpoJogador = player.getPhysicsLocation();
             Vector3f dirCorpoJogador = player.getViewDirection();
-            
-            // 2.2. Define a posição da câmara (os "olhos")
-            cam.setLocation(posCorpoJogador.add(new Vector3f(0, 1.5f, 0))); 
-
-            // 2.3. Calcula a Rotação COMPLETA (Corpo + Pescoço)
-            Quaternion rotCorpo = tempRotation; 
+            cam.setLocation(posCorpoJogador.add(new Vector3f(0, 1.5f, 0)));
+            Quaternion rotCorpo = tempRotation;
             rotCorpo.lookAt(dirCorpoJogador, Vector3f.UNIT_Y);
-            
             Quaternion rotPescoco = new Quaternion();
             rotPescoco.fromAngleAxis(camVerticalAngle, Vector3f.UNIT_X);
-            
             Quaternion rotFinal = rotCorpo.mult(rotPescoco);
-            
-            // 2.4. Aplica a rotação final à câmara
             cam.setRotation(rotFinal);
-            
         } else {
-            // --- MODO VISTA DE CIMA "DIAGONAL" ---
-            
-            // 2.1. Obtém a posição do "chão" do jogador
+            // --- MODO VISTA DE CIMA (DIAGONAL) ---
+            // (CORRIGIDO: 150f era muito alto e 0f no Z era "plano")
             Vector3f posJogador = player.getPhysicsLocation();
-            
-            // 2.2. Define um "deslocamento" (offset) fixo para a câmara
-            // (Vamos 15 unidades para CIMA (Y) e 12 unidades para TRÁS (Z))
-            Vector3f offsetCamera = new Vector3f(0f, 150f, 0f);
-            
-            // 2.3. Calcula a nova Posição da Câmara
+            // Podes brincar com estes valores! (Y=20, Z=-15)
+            Vector3f offsetCamera = new Vector3f(0f, 100f, 0f); 
             Vector3f novaPosCamera = posJogador.add(offsetCamera);
-            
-            // 2.4. Define a Posição da Câmara
             cam.setLocation(novaPosCamera);
-            
-            // 2.5. Faz a câmara OLHAR SEMPRE para o jogador
             cam.lookAt(posJogador, Vector3f.UNIT_Y);
         }
     }
 
     @Override
     public void simpleRender(RenderManager rm) {
-        // Método para lógica de renderização (pode ficar vazio)
+        // Deixa vazio por agora
     }
 }
