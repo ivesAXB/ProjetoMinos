@@ -26,22 +26,30 @@ import com.jme3.scene.shape.Box;
  * Esta classe inicializa o jogo, o mundo da física e os controlos.
  */
 public class Main extends SimpleApplication implements ActionListener, AnalogListener {
-
+    private boolean modoCameraCima = false;
     // --- Variáveis Globais do Jogo ---
-    
     // O "chefe" do mundo da física. Controla a gravidade e as colisões.
     private BulletAppState bulletAppState; 
-    
     // O nosso jogador. É um "controlador" de física, não um objeto visual.
     private CharacterControl player;       
-    
     // "Bandeiras" (flags) para saber se as teclas de movimento estão premidas
     private boolean left = false, right = false, up = false, down = false;
-    
     // Um objeto "ajudante" para cálculos de rotação (evita criar novos a cada frame)
     private final Quaternion tempRotation = new Quaternion();
-    
     private float camVerticalAngle = 0f;
+    private final String[] mapaLabirinto = new String[] {
+        "XXXXXXXXXXXXXXXXXXXXX",
+        "X        X          X",
+        "X XXX XX X XXX XX X X",
+        "X X   X  X X   X  X X",
+        "X XX XXX X XX XXX X X",
+        "X  X   X X  X   X X X",
+        "XX XX X X XX XX X X X",
+        "X   X X    X   X X X",
+        "X XXX XXXXXX XXX X X",
+        "X   X      X   X   X",
+        "XXXXXXXXXXXXXXXXXXXXX"
+    };
 
     
     /**
@@ -79,37 +87,9 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
         inputManager.setCursorVisible(false);
         setupKeys(); // Chama o nosso método para mapear as teclas
 
-        // --- 3. Criar o Chão ---
+        construirLabirinto();
         
-        // Define a "forma" (100 de largura, 0.1 de altura, 100 de comprimento)
-        // Usamos 50f * 2 = 100 unidades
-        Box formaChao = new Box(50f, 0.1f, 50f);
-        Geometry geometriaChao = new Geometry("Chao", formaChao);
-
-        // Define a "cor" (verde)
-        Material materialChao = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
-        materialChao.setColor("Color", ColorRGBA.Green);
-        geometriaChao.setMaterial(materialChao);
-
-        // Adiciona o chão visual ao "palco" principal (rootNode)
-        rootNode.attachChild(geometriaChao);
-        
-        // Adiciona a FÍSICA ao chão
-        // Cria uma forma de colisão igual à forma visual
-        CollisionShape formaFisicaChao = CollisionShapeFactory.createBoxShape(geometriaChao);
-        // Cria o "corpo" físico (0kg = Estático, não se mexe)
-        RigidBodyControl fisicaChao = new RigidBodyControl(formaFisicaChao, 0);
-        geometriaChao.addControl(fisicaChao); // "Cola" a física ao visual
-        bulletAppState.getPhysicsSpace().add(fisicaChao); // Adiciona ao mundo da física
-
-        // --- 4. Criar a Parede de Teste ---
-        
-        // Chama o nosso método "ajudante" para criar uma parede
-        // Posição: X=0, Y=1.5f (meia altura), Z=-10f (À NOSSA FRENTE)
-        criarParede(0, 3f, 20f); // <-- CORRIGIDO!
-
         // --- 5. Criar o Jogador ---
-        
         // Define a forma de colisão do jogador (uma "cápsula")
         // Raio de 0.5f, Altura de 2f
         CapsuleCollisionShape capsuleShape = new CapsuleCollisionShape(0.5f, 2f);
@@ -124,7 +104,7 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
 
         // Define a posição inicial do jogador
         // (0, 3, 0) -> 3 unidades ACIMA do chão (para ele "cair" no início)
-        player.setPhysicsLocation(new Vector3f(0, 3, 0));
+        player.setPhysicsLocation(new Vector3f(4.0f, 3.0f, 4.0f));
 
         // Adiciona o jogador APENAS ao mundo da física
         // (Não o adicionamos ao rootNode, porque ele é invisível, só a sua física importa)
@@ -139,17 +119,17 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
      */
     private void criarParede(float x, float y, float z) {
         // Define as dimensões da parede
-        float largura = 20.0f;
-        float altura = 2.5f;
-        float espessura = 0.5f;
+        float raioLargura = 2.0f; // Metade da largura (Total = 4.0f)
+        float raioAltura = 1.5f;  // Metade da altura (Total = 3.0f)
+        float raioEspessura = 2.0f; // Metade da espessura (Total = 4.0f)
         
         // Cria a "forma" visual (uma caixa)
-        Box formaParede = new Box(largura, altura, espessura);
+        Box formaParede = new Box(raioLargura, raioAltura, raioEspessura);
         Geometry geoParede = new Geometry("Parede", formaParede);
         
         // Cria o "material" (a cor)
         Material matParede = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
-        matParede.setColor("Color", ColorRGBA.Cyan); // <-- CORRIGIDO! (Para ser fácil de ver)
+        matParede.setColor("Color", ColorRGBA.Red); // <-- CORRIGIDO! (Para ser fácil de ver)
         geoParede.setMaterial(matParede);
 
         // --- A Física ---
@@ -169,6 +149,70 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
         rootNode.attachChild(geoParede); // Mundo Visual
         // Define a posição da parede no MUNDO DA FÍSICA
         fisicaCorpoParede.setPhysicsLocation(new Vector3f(x, y, z));
+    }
+    
+    /**
+     * Método ajudante que constroi 1 bloco de chão físico e visual
+     * @param x posição em X (centro do bloco)
+     * @param z posição Z centro do bloco
+     */
+    private void criarBlocoChao(float x, float z) {
+        float raioLargura = 2.0f;
+        float raioAltura = 0.1f;
+        float raioEspessura = 2.0f;
+        
+        Box formaChao = new Box(raioLargura, raioAltura, raioEspessura);
+        Geometry geoChao = new Geometry("Chao", formaChao);
+        
+        // COR do chão..
+        Material matChao = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+        matChao.setColor("Color", ColorRGBA.Green);
+        geoChao.setMaterial(matChao);
+        
+        //Fisica..
+        CollisionShape fisicaFormaChao = CollisionShapeFactory.createBoxShape(geoChao);
+        RigidBodyControl fisicaCorpoChao = new RigidBodyControl(fisicaFormaChao, 0); //0Kg
+        
+        //Define a posicao y = 0 para estar no chão
+        fisicaCorpoChao.setPhysicsLocation(new Vector3f(x, 0, z)); // y = 0
+        
+        geoChao.addControl(fisicaCorpoChao);
+        
+        //add ao mundo
+        bulletAppState.getPhysicsSpace().add(fisicaCorpoChao);
+        rootNode.attachChild(geoChao);
+        
+        
+    }
+    
+    private void construirLabirinto(){
+        float tamanhoBloco = 4.0f; //O nosso bloco é 4.0f x 4.0f
+        float alturaParede = 3.0f; // a nossa altura total é 3.0f
+        
+        //Loop pela altura do mapa (as linhas do eixo Z)
+        for (int z = 0; z < mapaLabirinto.length; z++) {
+            String linha = mapaLabirinto[z];
+            
+            //Loop pela largura do mapa (eixo X)
+            for (int x = 0; x < linha.length(); x++) {
+                //calcula a posicao que é compartilhada pelo chao e paredes
+                float posX = x * tamanhoBloco;
+                float posZ = z * tamanhoBloco;
+                
+                //Criar chao independente do char 'x' ou '  '...
+                criarBlocoChao(posX, posZ);
+                
+                //se o caractere for x constroi parede
+                char caractere = linha.charAt(x);
+                
+                if (caractere == 'X') {
+                   float posY = alturaParede / 2; //para a parede ficar no chão
+                   
+                   //chama a ferramente de paredes
+                   criarParede(posX, posY, posZ);
+                }
+            }
+        }
     }
     
     /**
@@ -195,6 +239,11 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
 
         // Diz ao "inputManager" que "esta" classe (this) vai ouvir os movimentos analógicos
         inputManager.addListener(this, "LookRight", "LookLeft", "LookUp", "LookDown");
+        
+        // Mapeia a tecla 'F' para a ação "ToggleCamera"
+        inputManager.addMapping("ToggleCamera", new KeyTrigger(KeyInput.KEY_F));
+        // Diz ao "ouvinte" (this) para "ouvir" esta nova ação
+        inputManager.addListener(this, "ToggleCamera");
     }
     
     /**
@@ -214,6 +263,14 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
             case "Right" -> right = isPressed;
             case "Up"    -> up = isPressed;
             case "Down"  -> down = isPressed;
+            case "ToggleCamera"-> {
+                // "isPressed" garante que só executamos na "descida" da tecla
+                if (isPressed) { 
+                    // Inverte o valor da "bandeira" (interruptor)
+                    modoCameraCima = !modoCameraCima; 
+                }
+                break; // Não te esqueças do break!
+            }
         }
     }
     
@@ -262,6 +319,7 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
                 camVerticalAngle += rotationAmount;
                 break;
             }
+            
         }
         
         float maxAngle = 1.396f; //80 graus
@@ -311,25 +369,49 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
         // .mult(0.1f) define a velocidade (0.1f). Podes aumentar para 0.2f, 0.3f, etc.
         player.setWalkDirection(walkDirection.setY(0).normalizeLocal().mult(0.1f)); 
 
-        // --- 2. Lógica da Câmara (Modo 1ª Pessoa) ---
-        // 2.1 Obtém a posição e a direção do CORPO horizontal
-        Vector3f posCorpoJogador = player.getPhysicsLocation();
-        Vector3f dirCorpoJogador = player.getViewDirection();
+        // --- 2. Lógica da Câmara (COM O INTERRUPTOR) ---
         
-        //2.2 define a posição da camera os olhos.
-        cam.setLocation(posCorpoJogador.add(new Vector3f(0, 1.5f, 0)));
-        
-        //2.3 calcula a rotação completa corpo+pescoço
-        Quaternion rotCorpo = tempRotation; //reutiliza nossa variavel ajudante
-        rotCorpo.lookAt(dirCorpoJogador, Vector3f.UNIT_Y);
-        
-        Quaternion rotPescoco = new Quaternion();
-        rotPescoco.fromAngleAxis(camVerticalAngle, Vector3f.UNIT_X);
-        
-        Quaternion rotFinal = rotCorpo.mult(rotPescoco);
-        
-        //2.4 aplica a rotacao final a camera
-        cam.setRotation(rotFinal);
+        if (modoCameraCima == false) {
+            // --- MODO 1ª PESSOA ---
+            
+            // 2.1. Obtém a posição e direção do CORPO (horizontal)
+            Vector3f posCorpoJogador = player.getPhysicsLocation();
+            Vector3f dirCorpoJogador = player.getViewDirection();
+            
+            // 2.2. Define a posição da câmara (os "olhos")
+            cam.setLocation(posCorpoJogador.add(new Vector3f(0, 1.5f, 0))); 
+
+            // 2.3. Calcula a Rotação COMPLETA (Corpo + Pescoço)
+            Quaternion rotCorpo = tempRotation; 
+            rotCorpo.lookAt(dirCorpoJogador, Vector3f.UNIT_Y);
+            
+            Quaternion rotPescoco = new Quaternion();
+            rotPescoco.fromAngleAxis(camVerticalAngle, Vector3f.UNIT_X);
+            
+            Quaternion rotFinal = rotCorpo.mult(rotPescoco);
+            
+            // 2.4. Aplica a rotação final à câmara
+            cam.setRotation(rotFinal);
+            
+        } else {
+            // --- MODO VISTA DE CIMA "DIAGONAL" ---
+            
+            // 2.1. Obtém a posição do "chão" do jogador
+            Vector3f posJogador = player.getPhysicsLocation();
+            
+            // 2.2. Define um "deslocamento" (offset) fixo para a câmara
+            // (Vamos 15 unidades para CIMA (Y) e 12 unidades para TRÁS (Z))
+            Vector3f offsetCamera = new Vector3f(0f, 150f, 0f);
+            
+            // 2.3. Calcula a nova Posição da Câmara
+            Vector3f novaPosCamera = posJogador.add(offsetCamera);
+            
+            // 2.4. Define a Posição da Câmara
+            cam.setLocation(novaPosCamera);
+            
+            // 2.5. Faz a câmara OLHAR SEMPRE para o jogador
+            cam.lookAt(posJogador, Vector3f.UNIT_Y);
+        }
     }
 
     @Override
