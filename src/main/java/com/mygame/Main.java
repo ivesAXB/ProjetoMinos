@@ -20,6 +20,7 @@ import com.jme3.math.Vector3f;
 import com.jme3.renderer.RenderManager;
 import com.jme3.scene.Geometry;
 import com.jme3.scene.shape.Box;
+import java.util.List;
 
 /**
  * Classe principal do "Projeto Minos".
@@ -28,9 +29,10 @@ import com.jme3.scene.shape.Box;
 public class Main extends SimpleApplication implements ActionListener, AnalogListener {
 
     // --- Variáveis Globais do Jogo ---
-    
+    private Vector3f spawnPoint = new Vector3f(0, 3.0f, 0);
     private BulletAppState bulletAppState;
     private CharacterControl player;
+    private Pathfinder pathfinder;
     
     // Flags de movimento
     private boolean left = false, right = false, up = false, down = false;
@@ -43,6 +45,7 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
     
     // Flag para o "interruptor" da câmara (F)
     private boolean modoCameraCima = false;
+    
     
     // O "mapa" 2D do nosso labirinto
     private final String[] mapaLabirinto = new String[]{
@@ -86,6 +89,38 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
 
         // 3. Constrói o Mundo
         construirLabirinto(); // Este método agora constrói o chão E as paredes
+        
+        // --- NOVO CÓDIGO (Ligar o "Cérebro" A*) ---
+        
+        // 1. Cria o Pathfinder (ele vai ler o mapa de 'X' e 'O')
+        this.pathfinder = new Pathfinder(mapaLabirinto);
+        
+        // 2. PEDE-LHE PARA CALCULAR O CAMINHO MAIS LONGO!
+        // (Isto vai definir o 'noInicio' e 'noFim' dentro dele)
+        pathfinder.encontrarInicioEFimMaisLongos();
+
+        // 3. Pede-lhe o caminho (que ele agora sabe qual é)
+        List<Node> caminho = pathfinder.encontrarCaminho();
+
+        // 4. Verifica se ele encontrou um caminho
+        if (caminho != null) {
+            // SUCESSO! Vamos "pintar" o caminho e definir o spawn
+            desenharCaminho(caminho); // Pinta o caminho azul
+            
+            // Define o spawn do JOGADOR
+            Node noSpawn = pathfinder.getNoInicio();
+            float spawnX = noSpawn.x * 4.0f; // (4.0f é o nosso tamanhoBloco)
+            float spawnZ = noSpawn.z * 4.0f;
+            this.spawnPoint = new Vector3f(spawnX, 3.0f, spawnZ);
+            
+            // Pinta o bloco de Fim (Ciano)
+            Node noFim = pathfinder.getNoFim();
+            criarBlocoFim(noFim.x * 4.0f, noFim.z * 4.0f);
+            
+        } else {
+            // FALHA! (O mapa não tem solução)
+            System.out.println("ALERTA: O Algoritmo A* não encontrou um caminho!");
+        }
 
         // 4. Cria o Jogador
         CapsuleCollisionShape capsuleShape = new CapsuleCollisionShape(0.5f, 2f);
@@ -95,7 +130,7 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
         player.setGravity(30);
 
         // Define o Ponto de Spawn (Estático) - (Mapa 1,1) -> (Mundo 4,3,4)
-        player.setPhysicsLocation(new Vector3f(4.0f, 3.0f, 4.0f));
+        player.setPhysicsLocation(this.spawnPoint);
 
         // Adiciona o jogador ao mundo da física
         bulletAppState.getPhysicsSpace().add(player);
@@ -167,31 +202,110 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
         // 3. Move
         fisicaCorpoChao.setPhysicsLocation(new Vector3f(x, 0, z)); // Y=0 (no chão)
     }
+    
+    private void criarBlocoSpawn(float x, float z) {
+        float raioLargura = 2.0f, raioAltura = 0.1f, raioEspessura = 2.0f;
+        Box forma = new Box(raioLargura, raioAltura, raioEspessura);
+        Geometry geo = new Geometry("Spawn", forma);
+        
+        Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+        mat.setColor("Color", ColorRGBA.Yellow); // <-- AMARELO
+        geo.setMaterial(mat);
+
+        // Lógica de Física (igual ao criarBlocoChao)
+        CollisionShape cs = CollisionShapeFactory.createBoxShape(geo);
+        RigidBodyControl rbc = new RigidBodyControl(cs, 0);
+        geo.addControl(rbc);
+        bulletAppState.getPhysicsSpace().add(rbc);
+        rootNode.attachChild(geo);
+        rbc.setPhysicsLocation(new Vector3f(x, 0, z)); // Y=0
+    }
+    
+    private void criarBlocoFim(float x, float z) {
+        float raioLargura = 2.0f, raioAltura = 0.1f, raioEspessura = 2.0f;
+        Box forma = new Box(raioLargura, raioAltura, raioEspessura);
+        Geometry geo = new Geometry("Spawn", forma);
+        
+        Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+        mat.setColor("Color", ColorRGBA.Cyan); // <-- Ciano
+        geo.setMaterial(mat);
+
+        // Lógica de Física (igual ao criarBlocoChao)
+        CollisionShape cs = CollisionShapeFactory.createBoxShape(geo);
+        RigidBodyControl rbc = new RigidBodyControl(cs, 0);
+        geo.addControl(rbc);
+        bulletAppState.getPhysicsSpace().add(rbc);
+        rootNode.attachChild(geo);
+        rbc.setPhysicsLocation(new Vector3f(x, 0, z)); // Y=0
+    }
+    
+    /**
+     * Constrói UM bloco de CHÃO AZUL (para mostrar o caminho do A*).
+     */
+    private void criarBlocoCaminho(float x, float z) {
+        float raioLargura = 2.0f, raioAltura = 0.1f, raioEspessura = 2.0f;
+        Box forma = new Box(raioLargura, raioAltura, raioEspessura);
+        Geometry geo = new Geometry("Caminho", forma);
+        
+        Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+        mat.setColor("Color", ColorRGBA.Blue); // <-- AZUL
+        geo.setMaterial(mat);
+
+        // A física é igual ao chão normal
+        CollisionShape cs = CollisionShapeFactory.createBoxShape(geo);
+        RigidBodyControl rbc = new RigidBodyControl(cs, 0);
+        geo.addControl(rbc);
+        bulletAppState.getPhysicsSpace().add(rbc);
+        rootNode.attachChild(geo);
+        rbc.setPhysicsLocation(new Vector3f(x, 0, z)); // Y=0
+    }
 
     /**
      * Lê o mapa e constrói o chão e as paredes.
      */
     private void construirLabirinto() {
-        float tamanhoBloco = 4.0f; // Nosso bloco é 4x4
-        float alturaParede = 3.0f; // Nossa parede tem 3 de altura
-
+        float tamanhoBloco = 4.0f;
+        float alturaParede = 3.0f;
+        
         for (int z = 0; z < mapaLabirinto.length; z++) {
             String linha = mapaLabirinto[z];
             for (int x = 0; x < linha.length(); x++) {
                 
-                // 1. Calcula a posição 3D
                 float posX = x * tamanhoBloco;
                 float posZ = z * tamanhoBloco;
                 
-                // 2. CRIA O CHÃO (Sempre!)
-                criarBlocoChao(posX, posZ);
-
-                // 3. Se for 'X', cria a parede
+                // 1. Cria SEMPRE um chão verde
+                criarBlocoChao(posX, posZ); 
+                
+                // 2. Se for 'X', cria uma parede
                 char caractere = linha.charAt(x);
                 if (caractere == 'X') {
-                    float posY = alturaParede / 2; // (1.5f)
+                    float posY = alturaParede / 2;
                     criarParede(posX, posY, posZ);
                 }
+            }
+        }
+    }
+    
+    private void desenharCaminho(List<Node> caminho) {
+        float tamanhoBloco = 4.0f;
+        
+        // Pega no nó de início e fim
+        Node noInicio = pathfinder.getNoInicio();
+        Node noFim = pathfinder.getNoFim();
+        
+        for (Node no : caminho) {
+            float posX = no.x * tamanhoBloco;
+            float posZ = no.z * tamanhoBloco;
+
+            // Decide qual cor pintar
+            if (no.equals(noInicio)) {
+                criarBlocoSpawn(posX, posZ); // Pinta o Início de Amarelo
+            } else if (no.equals(noFim)) {
+                // (O Fim já foi pintado no simpleInitApp, mas não faz mal)
+                // criarBlocoFim(posX, posZ); 
+            } else {
+                criarBlocoCaminho(posX, posZ); // Pinta o resto de Azul
             }
         }
     }
