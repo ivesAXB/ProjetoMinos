@@ -46,21 +46,17 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
     // Flag para o "interruptor" da câmara (F)
     private boolean modoCameraCima = false;
     
+    // --- PARÂMETROS DA IA "ARQUITETO" ---
+    private static final int LARGURA_MAPA = 21;
+    private static final int ALTURA_MAPA = 11;
+    private static final int TAMANHO_POPULACAO = 100; // 100 mapas por geração
+    private static final float TAXA_MUTACAO = 0.05f; // 5% de chance de um bloco mudar
+    private static final float TAXA_CROSSOVER = 0.7f; // 70% de chance de "cruzamento"
+    private static final int NUM_ELITE = 5; // 5 melhores mapas sobrevivem sempre
+    private static final int GERACOES = 50; // Quantas "gerações" vamos evoluir
     
     // O "mapa" 2D do nosso labirinto
-    private final String[] mapaLabirinto = new String[]{
-        "XXXXXXXXXXXXXXXXXXXXX",
-        "XOOOOOOOOXOOOOOOOOOOX", // O Spawn é aqui (1,1)
-        "XOXXXOXXOXOXXXOXXOXOX",
-        "XOXOOOXOOXOXOOOXOOXOX",
-        "XOXXOXXXOXOXXOXXXOXOX",
-        "XOOXOOOXOOOOXOOOXOXOX",
-        "XXOXXOXOXOXXOXXOXOXOX",
-        "XOOOXOXOOOOOOOOXOXOOX",
-        "XOXXXOXXXXXXOXXXOXOOX",
-        "XOOOXOOOOOOXOOOXOOOOX",
-        "XXXXXXXXXXXXXXXXXXXXX"
-    };
+    private String[] mapaLabirinto;
 
     /**
      * Ponto de entrada do programa.
@@ -77,35 +73,68 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
     @Override
     public void simpleInitApp() {
 
-        // 1. Inicia a Física
+        // --- 1. EXECUTAR A IA "ARQUITETO" (ALGORITMO GENÉTICO) ---
+        System.out.println("--- PROJETO MINOS: INICIANDO EVOLUÇÃO ---");
+        
+        // 1a. Cria o "Motor" da IA com os nossos parâmetros
+        AlgoritmoGenetico ag = new AlgoritmoGenetico(
+                TAMANHO_POPULACAO,
+                TAXA_MUTACAO,
+                TAXA_CROSSOVER,
+                NUM_ELITE,
+                LARGURA_MAPA,
+                ALTURA_MAPA
+        );
+
+        // 1b. Cria a "Geração 0" (mapas aleatórios)
+        ag.inicializarPopulacao();
+
+        // 1c. Loop de Evolução (O "Treino")
+        for (int i = 0; i < GERACOES; i++) {
+            // "Dá as notas" (calcula o fitness) para cada mapa
+            ag.calcularFitnessPopulacao();
+            
+            // Imprime o progresso (para sabermos que não crashou)
+            System.out.println("Geração " + i + " | Melhor Fitness (Caminho): " + ag.getMelhorMapa().fitness);
+
+            // "Evolui" (cria a próxima geração)
+            ag.evoluirProximaGeracao();
+        }
+        
+        // 1d. Treino Concluído! Pega no melhor mapa de todos.
+        ag.calcularFitnessPopulacao(); // Calcula a nota da última geração
+        MapaGenetico melhorMapa = ag.getMelhorMapa();
+        
+        // 1e. "Traduz" o DNA (char[][]) para o formato que o jogo entende (String[])
+        // E guarda-o na nossa variável global
+        this.mapaLabirinto = melhorMapa.paraStringArray();
+        
+        System.out.println("--- EVOLUÇÃO CONCLUÍDA! A CONSTRUIR O MUNDO... ---");
+        
+        
+        // --- 2. O RESTO DO JOGO (Tudo como antes!) ---
+        // (O código abaixo é o mesmo que já tínhamos, mas agora ele
+        // usa o "this.mapaLabirinto" que a IA acabou de criar!)
+        
+        // 2a. Inicia a Física
         bulletAppState = new BulletAppState();
         stateManager.attach(bulletAppState);
-        // Descomente a linha abaixo para ver os "arames" azuis da física
         // bulletAppState.setDebugEnabled(true);
 
-        // 2. Configura os Controlos
+        // 2b. Configura os Controlos
         inputManager.setCursorVisible(false);
-        setupKeys(); // Chama o nosso método de mapeamento
+        setupKeys();
 
-        // 3. Constrói o Mundo
-        construirLabirinto(); // Este método agora constrói o chão E as paredes
-        
-        // --- NOVO CÓDIGO (Ligar o "Cérebro" A*) ---
-        
-        // 1. Cria o Pathfinder (ele vai ler o mapa de 'X' e 'O')
-        this.pathfinder = new Pathfinder(mapaLabirinto);
-        
-        // 2. PEDE-LHE PARA CALCULAR O CAMINHO MAIS LONGO!
-        // (Isto vai definir o 'noInicio' e 'noFim' dentro dele)
-        pathfinder.encontrarInicioEFimMaisLongos();
+        // 2c. Constrói o Mundo (Lendo o mapa da IA!)
+        construirLabirinto(); // Este método já lê "this.mapaLabirinto"
 
-        // 3. Pede-lhe o caminho (que ele agora sabe qual é)
+        // 2d. Cria e "Pinta" a Solução (O "Professor" a funcionar)
+        this.pathfinder = new Pathfinder(this.mapaLabirinto);
+        pathfinder.encontrarInicioEFimMaisLongos(); // Encontra S e F
         List<Node> caminho = pathfinder.encontrarCaminho();
 
-        // 4. Verifica se ele encontrou um caminho
         if (caminho != null) {
-            // SUCESSO! Vamos "pintar" o caminho e definir o spawn
-            desenharCaminho(caminho); // Pinta o caminho azul
+            desenharCaminho(caminho); // Pinta o caminho (Azul/Amarelo)
             
             // Define o spawn do JOGADOR
             Node noSpawn = pathfinder.getNoInicio();
@@ -118,21 +147,18 @@ public class Main extends SimpleApplication implements ActionListener, AnalogLis
             criarBlocoFim(noFim.x * 4.0f, noFim.z * 4.0f);
             
         } else {
-            // FALHA! (O mapa não tem solução)
-            System.out.println("ALERTA: O Algoritmo A* não encontrou um caminho!");
+            System.err.println("ALERTA: A IA GEROU UM MAPA INVÁLIDO (SEM CAMINHO)!");
+            // (Mesmo assim, coloca o jogador num sítio seguro)
+            this.spawnPoint = new Vector3f(4.0f, 3.0f, 4.0f);
         }
 
-        // 4. Cria o Jogador
+        // 2e. Cria o Jogador
         CapsuleCollisionShape capsuleShape = new CapsuleCollisionShape(0.5f, 2f);
         player = new CharacterControl(capsuleShape, 0.1f);
         player.setJumpSpeed(20);
         player.setFallSpeed(30);
         player.setGravity(30);
-
-        // Define o Ponto de Spawn (Estático) - (Mapa 1,1) -> (Mundo 4,3,4)
-        player.setPhysicsLocation(this.spawnPoint);
-
-        // Adiciona o jogador ao mundo da física
+        player.setPhysicsLocation(this.spawnPoint); // Coloca o jogador no 'S'
         bulletAppState.getPhysicsSpace().add(player);
     }
 
